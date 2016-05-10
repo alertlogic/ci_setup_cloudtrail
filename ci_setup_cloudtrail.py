@@ -6,6 +6,7 @@ import pprint
 import json
 import argparse
 import boto.s3
+import boto.sqs
 import ssl
 
 from boto.s3.connection import S3Connection
@@ -30,7 +31,7 @@ def main():
     # Load configuration file
     #
     with open(args.config) as data_file:    
-        data = expand_config(json.load(data_file), args.profile)
+        data = validate_config(json.load(data_file), args.profile)
     role_arn = data[u'role']
     external_id = data[u'external_id']
 
@@ -52,12 +53,13 @@ def main():
     print "Successfully updated CloudInsight configuration."
     print_instructions(data)
 
-def expand_config(data, profile):
-    bucket_name = data[u'bucket']
-    
+def validate_config(data, profile):
+    print "Validating configuration."
     if hasattr(ssl, '_create_unverified_context'):
         ssl._create_default_https_context = ssl._create_unverified_context
 
+    # Validate s3 bucket and get the region name where it resides
+    bucket_name = data[u'bucket']
     conn = profile and S3Connection(profile_name = profile) or S3Connection()
     bucket = conn.get_bucket(bucket_name)
     location = get_bucket_location(bucket.get_location())
@@ -66,6 +68,10 @@ def expand_config(data, profile):
     elif data[u's3_bucket_region'] != location:
         raise Exception("Bucket '%s' doesn't reside in '%s' region. Use '%s' in your configuration file" % \
                         (bucket_name, data[u's3_bucket_region'], location))
+
+    # Validate SQS queues
+    for config in data[u'config']:
+        validate_sqs_queue(profile, config[u'region'], config[u'sqs_queue'])
     return data
   
 def get_credential(token, account_id, arn, external_id):
@@ -116,6 +122,24 @@ def get_source_config(account_id, environment_id, region, sources):
         }
     }
 
+def validate_sqs_queue(profile, region, sqs_queue_name):
+    conn = profile and  boto.sqs.connect_to_region(region, profile_name = profile) or \
+                        boto.sqs.connect_to_region(region) 
+    sqs_queue = conn.get_queue(sqs_queue_name)
+    if not sqs_queue:
+        raise Exception("SQS Queue '%s' doesn't exist in '%s' region" % (sqs_queue_name, region))    
+
+    statement = json.loads(sqs_queue.get_attributes()[u'Policy'])[u'Statement']
+    for sid in statement:
+        if u'Effect' in sid and sid[u'Effect'] == u'Allow' and \
+                u'Action' in sid and sid[u'Action'] == u'SQS:SendMessage' and \
+                u'Condition' in sid and u'ArnEquals' in sid[u'Condition'] and \
+                u'aws:SourceArn' in sid[u'Condition'][u'ArnEquals']:
+            arn = sid[u'Condition'][u'ArnEquals'][u'aws:SourceArn'].split(u':')
+            if arn[2] == u'sns': return True
+    print "Warning: Didn't detect if '%s' SQS Queue has permissions to allow SNS publishing. \
+Follow instructions in http://docs.aws.amazon.com/sns/latest/dg/SendMessageToSQS.html#SendMessageToSQS.sqs.permissions to setup to give permission to the Amazon SNS topic to send messages to the Amazon SQS queue." % sqs_queue_name
+ 
 def get_bucket_location(location):
     return location and location or u'us-east-1'
 
