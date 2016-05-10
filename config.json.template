@@ -1,0 +1,16 @@
+{
+    "bucket": "Put your AWS CloudTrail S3 bucket name here",
+    "role": "Put your role ARN here",
+    "external_id": "Put Your external Id here",
+    "config": [
+        {
+            "region": "us-east-1",
+            "sqs_queue": "Put SQS Name here."
+        },
+        {
+            "region": "us-west-2",
+            "sqs_queue": "Put SQS Name here."
+        }
+        ... Repeat this for all regions you want to be monitored
+    ]
+}
