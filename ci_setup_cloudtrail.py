@@ -23,7 +23,7 @@ def main():
     parser.add_argument("-a", "--account", metavar="account_id", help="CloudInsight's account id", required=True)
     parser.add_argument("-e", "--environment", metavar="environment_id", help="CloudInsight's environment id", required=True)
     parser.add_argument("-c", "--config", metavar="config", help="Configuration file", required=True)
-    parser.add_argument("-P", "--profile", metavar="profile", help="AWS SDK Profile name", required=False)
+    parser.add_argument("-P", "--profile", metavar="profile", help="AWS SDK Profile name", required=True)
     args = parser.parse_args()
 #    print args
 
