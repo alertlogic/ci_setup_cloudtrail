@@ -9,12 +9,12 @@
 
 **Note:** The latest version of Mac OS X, El Capitan, comes with Python 2.7 out of the box. 
 
-#### Install the latest version of boto
-```$ pip install boto```
+#### Install the latest version of boto3
+```$ pip install boto3```
 
-If you already have boto installed, make sure to upgrade it to the latest version.
+If you already have ```boto3``` installed, make sure to upgrade it to the latest version. This utility has been tested with boto3 version 1.3.1
 
-```$ pip install --upgrade boto```
+```$ pip install --upgrade boto3```
 
 **Note:** Homebrew installs ```pip``` for you.
 
@@ -26,12 +26,12 @@ Install python package using your OS package installation system (dpkg or rpm). 
 
 **Note:** The latest versions of CentOS, Fedora, Redhat Enterprise (RHEL) and Ubuntu come with Python 2.7 out of the box.
 
-#### Install the latest version of boto
-```$ pip install boto```
+#### Install the latest version of boto3
+```$ pip install boto3```
 
-If you already have boto installed, make sure to upgrade it to the latest version.
+If you already have ```boto3``` installed, make sure to upgrade it to the latest version. This utility has been tested with boto3 version 1.3.1
 
-```$ pip install --upgrade boto```
+```$ pip install --upgrade boto3```
 
 **Note:** ```pip``` comes preinstalled with python v 2.7 or higher
 
@@ -53,7 +53,7 @@ $ chmod 755 ci_setup_cloudtrail.py
 1.1. Make sure AWS CloudTrail is setup to send notifications to AWS SNS. Preferably SNS Topic should exists in the same account as the S3 bucket where AWS CloudTrail is storing logs.  
 For detailed instructions see: http://docs.aws.amazon.com/awscloudtrail/latest/userguide/configure-cloudtrail-to-send-notifications.html  
 1.2. Ensure that AWS CloudTrail has permissions to send notifications to SNS Topic. For detailed instructions see: http://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-permissions-for-sns-notifications.html  
-2. Switch to an account that owns S3 bucket where AWS CloudTrail logs are stored. 
+2. **Switch to an account that owns S3 bucket where AWS CloudTrail logs are stored.**  
 3. Create SQS Queues for each region you want CloudInsight to monitor and subscribe to the SNS Topic used to receive AWS CloudTrail notifications. Follow detailed instructions see: http://docs.aws.amazon.com/sns/latest/dg/SendMessageToSQS.html   
 4. Create a cross-account role to give CloudInsight permission to access AWS CloudTrail logs.    
 4.1. Create IAM Policy to be used by cross-account role. Use the policy document below and make sure to substitute strings in ```<>``` with your account's values.  
@@ -61,17 +61,6 @@ For detailed instructions see: http://docs.aws.amazon.com/awscloudtrail/latest/u
 {
     "Version": "2012-10-17",
     "Statement": [
-        {
-            "Sid": "GetCloudTrailData",
-            "Effect": "Allow",
-            "Action": [
-                "s3:GetBucketLocation",
-                "s3:GetBucket*",
-                "s3:GetObjectAcl",
-                "s3:GetObjectVersionAcl"
-            ],  
-            "Resource": "<YOUR S3 BUCKET ARN>*"
-        },
         {
             "Sid": "ReceiveSQSNotifications",
             "Effect": "Allow",
@@ -89,6 +78,7 @@ For detailed instructions see: http://docs.aws.amazon.com/awscloudtrail/latest/u
 4.2.2. Pick Extrenal ID  
 4.2.3. Choose policy created in step 1.1 and create IAM Role.
 
+
 #### Running AWS CloudTrail Monitoring Utility
 1. From CloudInsight user interface get your account id and environment id you want to setup to monitor your AWS CloudTrail. To get this information, login into CloudInsight, click on your user name in the top right corner and select 'Support'.  
 2. Update ```~/.aws/credentials``` to contain a profile that allows access to the account where AWS CloudTrail stores logs  
@@ -97,5 +87,5 @@ For detailed instructions see: http://docs.aws.amazon.com/awscloudtrail/latest/u
 ```$ ./ci_setup_cloudtrail --help```  
 Here is an example with command line options specied:  
 ```./ci_setup_cloudtrail.py -u someuser@acmecorp.com -p "Password1234$" -a 99999999 -e "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX" -c config.json -P production_profile``` 
-
+5. The utility will print the S3 Bucket Policy statement that needs to be added to your S3 Bucket.
  
