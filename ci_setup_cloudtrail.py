@@ -7,14 +7,11 @@ import json
 import argparse
 import boto3
 import boto3.session
-#import boto.sqs
 import ssl
 
-#from boto.s3.connection import S3Connection
 from argparse import RawTextHelpFormatter
 
 from ci_api import authenticate, get_sources, create_source, get_credentials, create_credential
-from aws_api import get_cloud_trail_configuration
 
 
 def main():
