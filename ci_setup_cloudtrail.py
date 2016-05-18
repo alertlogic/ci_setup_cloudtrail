@@ -110,6 +110,11 @@ def get_source_config(account_id, environment_id, region, sources):
                 u'collection_type': u's3aws',
                 u's3aws': {
                     u'aws_region': region,
+                    u'credential': {
+                        u'id': ''
+                    },
+                    u's3_bucket_region' = '',
+                    u'sqs_queue' = ''
                 }
             },
             u'enabled': u'true',
