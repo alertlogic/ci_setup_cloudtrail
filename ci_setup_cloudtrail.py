@@ -117,12 +117,11 @@ def get_source_config(account_id, environment_id, region, sources):
                     u'sqs_queue': ''
                 }
             },
-            u'enabled': u'true',
-            u'host': {u'id': environment_id},
+            u'enabled': True,
             u'product_type': u'lm',
             u'type': u'api',
             u'environment': environment_id,
-            u'name': u'"$outcomes-%s-%s' % (account_id, region)
+            u'name': u'$outcomes-%s-%s' % (account_id, region)
         }
     }
 
