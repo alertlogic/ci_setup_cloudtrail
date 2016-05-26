@@ -1,0 +1,10 @@
+{
+    "role": "",
+    "external_id": "",
+    "trails": [
+        {
+            "name": "Default",
+            "regions": ["us-west-2"]
+        }
+    ]
+}
