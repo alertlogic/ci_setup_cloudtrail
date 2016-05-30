@@ -182,8 +182,8 @@ Where config.json is:
 }
 ```  
 4.3. When you specify ```trail``` type in ```config.json```, the AWS CloudTrail Monitoring Utility performs the following:  
- * Discovers CloudTrail configuration in AWS account using profile specified by -s argument
- * Creates SQS Queue to subscribe for SNS Topic Notifications in AWS account using profile specified by by the -P argument
- * Subscribes newly created SQS Queue to receive SNS Topic Notifications
+4.3.1 Discovers CloudTrail configuration in AWS account using profile specified by -s argument  
+4.3.2 Creates SQS Queue to subscribe for SNS Topic Notifications in AWS account using profile specified by by the -P argument  
+4.3.3 Subscribes newly created SQS Queue to receive SNS Topic Notifications  
 5. The utility will print the S3 Bucket Policy statement that needs to be added to your S3 Bucket.
  
