@@ -185,6 +185,5 @@ Where config.json is:
  * Discovers CloudTrail configuration in AWS account using profile specified by -s argument
  * Creates SQS Queue to subscribe for SNS Topic Notifications in AWS account using profile specified by by the -P argument
  * Subscribes newly created SQS Queue to receive SNS Topic Notifications
-
 5. The utility will print the S3 Bucket Policy statement that needs to be added to your S3 Bucket.
  
