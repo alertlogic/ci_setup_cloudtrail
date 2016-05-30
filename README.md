@@ -77,15 +77,114 @@ For detailed instructions see: http://docs.aws.amazon.com/awscloudtrail/latest/u
 4.2.1. CloudInsight AWS Account ID: 733251395267  
 4.2.2. Pick Extrenal ID  
 4.2.3. Choose policy created in step 1.1 and create IAM Role.
+4.3. Update S3 bucket where CloudTrail logs are stored to include the following statements
+```
+{
+	"Sid": "GetCloudTrailObjects",
+	"Effect": "Allow",
+	"Principal": {
+		"AWS": "<CROSS-ACCOUNT ROLE ARN>"
+	},
+	"Action": [
+		"s3:GetObjectVersionAcl",
+		"s3:GetObject",
+		"s3:GetObjectAcl"
+	],
+	"Resource": "arn:aws:s3:::<S3 BUCKET NAME>/*"
+},
+{
+	"Sid": "GetCloudTrailObjects",
+	"Effect": "Allow",
+	"Principal": {
+		"AWS": "<CROSS-ACCOUNT ROLE ARN>"
+	},
+	"Action": [
+		"s3:ListBucket",
+		"s3:GetBucket*"
+	],
+	"Resource": "arn:aws:s3:::<S3 BUCKET NAME>"
+}
+```
 
 
 #### Running AWS CloudTrail Monitoring Utility
 1. From CloudInsight user interface get your account id and environment id you want to setup to monitor your AWS CloudTrail. To get this information, login into CloudInsight, click on your user name in the top right corner and select 'Support'.  
-2. Update ```~/.aws/credentials``` to contain a profile that allows access to the account where AWS CloudTrail stores logs  
+2. Update ```~/.aws/credentials``` to contain a profiles that allow access to the account where AWS CloudTrail stores logs and account that generates CloudTrail logs  
 3. Update ```config.json.template``` to include correct information for your deployment and save it as config.json
+3.1 Below is the format of the configuration file
+```
+{
+    "aws_account_id": "Put AWS Account ID where CloudTrail logs are originated from",
+    "role": "<CROSS-ACCOUNT ROLE ARN>",
+    "external_id": "<EXTERNAL ID>",
+    "regions": {
+        <REGION NAME>: {
+            "type": "trail" | "queue",
+            "trail" | "queue": <CLOUD TRAIL NAME> | <SQS QUEUE NAME>
+            /* "bucket_region" property is only applicable for "queue" type. Of omitted, us-east-1 is used.
+            "bucket_region": <Name of the region where bucket is located>
+        },
+        ...
+    }
+}  
+Variables Description:
+CROSS-ACCOUNT ROLE ARN - see Prerequisites 4.2
+EXTERNAL ID - see Prerequisites 4.2
+REGION NAME - Valid AWS CloudTrail Region name. See http://docs.aws.amazon.com/general/latest/gr/rande.html#ct_region
+CLOUD TRAIL NAME - Name of the CloudTrail to setup monitoring for
+SQS QUEUE NAME - Name (not arn) of the SQS QUEUE that subscribes to CloudTrail SNS Topic. SQS Queue must be in the same AWS Account as S3 bucket that receives CloudTrail logs.
+```  
 4. Run the utility. For the list of correct options execute:  
 ```$ ./ci_setup_cloudtrail --help```  
-Here is an example with command line options specied:  
-```./ci_setup_cloudtrail.py -u someuser@acmecorp.com -p "Password1234$" -a 99999999 -e "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX" -c config.json -P production_profile``` 
+Here are a few examples on how to run ```./ci_setup_cloudtrail.py```  
+4.1.  Setup CloudInsight backend to use queue and cross-account role specified in config.json for account id 123456
+```
+./ci_setup_cloudtrail.py -u someuser@acmecorp.com -p "Password1234$" -a 123456 -c config.json
+```  
+Example of config.json:
+```
+{
+    "aws_account_id": "2222222222",
+    "role": "arn:aws:iam::1111111111:role/CI_CloudTrail_Collection",
+    "external_id": "EXTERNAL ID",
+    "regions": {
+    	"us-west-2": {
+            "type": "queue",
+            "queue": "outcomesbucket-12345"
+        },
+        "us-east-1": {
+            "type": "queue",
+            "queue": "outcomesbucket-12345"
+        }
+    }
+}
+```  
+4.2. Setup CloudInsight backend to monitor CloudTrail specified in config.json for account id 123456  
+```
+./ci_setup_cloudtrail.py -u someuser@acmecorp.com -p "Password1234$" -c config.json -s CloudTrailAccountProfile -P S3AccountProfile
+```  
+Where config.json is:
+```
+{
+    "aws_account_id": "2222222222",
+    "role": "arn:aws:iam::1111111111:role/CI_CloudTrail_Collection",
+    "external_id": "EXTERNAL ID",
+    "regions": {
+    	"us-west-2": {
+            "type": "trail",
+            "trail": "CustomTrail"
+        },
+        "us-east-1": {
+            "type": "trail",
+            "trail": "Default"
+        }
+    }
+}
+```  
+4.3. When you specify ```trail``` type in ```config.json```, the AWS CloudTrail Monitoring Utility performs the following:  
+ * Discovers CloudTrail configuration in AWS account using profile specified by -s argument
+ * Creates SQS Queue to subscribe for SNS Topic Notifications in AWS account using profile specified by by the -P argument
+ * Subscribes newly created SQS Queue to receive SNS Topic Notifications
+
 5. The utility will print the S3 Bucket Policy statement that needs to be added to your S3 Bucket.
  

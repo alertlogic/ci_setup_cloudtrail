@@ -1,16 +1,14 @@
 {
-    "bucket": "Put your AWS CloudTrail S3 bucket name here",
-    "role": "Put your role ARN here",
-    "external_id": "Put Your external Id here",
-    "config": [
-        {
-            "region": "us-east-1",
-            "sqs_queue": "Put SQS Name here."
+    "aws_account_id": "Put your AWS Account ID here",
+    "role": "Put your cross-account role ARN here",
+    "external_id": "Put your cross-account role's external id here",
+    "regions": {
+        <Name of the region>: {
+            "type": "trail" | "queue",
+            "trail" | "queue": <Name of the trail> | <Name of the queue>
+            /* "bucket_region" property is only applicable for "queue" type. Of omitted, us-east-1 is used.
+            "bucket_region": <Name of the region where bucket is located>
         },
-        {
-            "region": "us-west-2",
-            "sqs_queue": "Put SQS Name here."
-        }
-        ... Repeat this for all regions you want to be monitored
-    ]
+        ...
+    }
 }

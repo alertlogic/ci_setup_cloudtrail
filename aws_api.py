@@ -5,68 +5,52 @@ import ssl
 
 from utils import Progress, Subprogress
 
-def get_cloud_trail_configuration(trails, sourceAccountSession, targetAccountSession):
+def get_cloud_trail_configuration(region_name, trail_name, sourceAccountSession, targetAccountSession):
     if not sourceAccountSession or not targetAccountSession:
         return None
 
-    valid_trails = {}
-    invalid_trails = {}
-
     source_account_id = get_account_id_from_arn(sourceAccountSession.client('iam').get_user()[u'User'][u'Arn'])
     target_account_id = get_account_id_from_arn(targetAccountSession.client('iam').get_user()[u'User'][u'Arn'])
-    trails_list = get_trails_list(trails, sourceAccountSession)
-    progress = Progress(
-                len(trails_list.keys()),
-                "Discovering CloudTrails for '%s' account:\t" % (source_account_id))
+    trail = sourceAccountSession.client(
+            'cloudtrail', 
+            region_name = region_name).describe_trails(trailNameList=[trail_name])[u'trailList']
+    if not trail:
+        return None
 
-    for region in trails_list:
-        progress.report()
-        trail = sourceAccountSession.client(
-                'cloudtrail', 
-                region_name = region).describe_trails(trailNameList=[trails_list[region]])[u'trailList']
-        if not trail:
-            invalid_trails[region] = make_trail_error(trails_list[region], "Invalid Trail")
-            continue 
+    # Get bucket
+    bucket_name = trail[0][u'S3BucketName']
+    try:
+        location = get_bucket_location(targetAccountSession.client('s3').get_bucket_location(Bucket = bucket_name))
+    except Exception as e:
+        if e.response['Error']['Code']:
+            return None
+            # This bucket doesn't belong to the 'target_account_id'
+#            invalid_trails[region] = make_trail_error(
+#                    trails_list[region],
+#                    "Bucket doesn't belong to %s" % (target_account_id))
+#                continue
+        else:
+            return None
 
-        # Get bucket
-        bucket_name = trail[0][u'S3BucketName']
-        try:
-            location = get_bucket_location(targetAccountSession.client('s3').get_bucket_location(Bucket = bucket_name))
-        except Exception as e:
-            if e.response['Error']['Code']:
-                # This bucket doesn't belong to the 'target_account_id'
-                invalid_trails[region] = make_trail_error(
-                    trails_list[region],
-                    "Bucket doesn't belong to %s" % (target_account_id))
-                continue
-            else:
-                invalid_trails[region] = make_trail_error(trails_list[region], "Unexpected error: %s" % e)
-                continue
+    # Make sure CloudTrail has SNS Topic
+    if u'SnsTopicARN' not in trail[0]:
+        return None
 
-        # Make sure CloudTrail has SNS Topic
-        if u'SnsTopicARN' not in trail[0]:
-            invalid_trails[region] = make_trail_error(trails_list[region], "Missing SNS Topic")
-            continue
-
-        valid_trails[region] = get_region_config(location, trail[0])
-
-    progress.done()
-    return {
-        u'valid_trails': valid_trails,
-        u'invalid_trails': invalid_trails
-    }
+    return get_region_config(location, trail[0])
 
 def setup_subscriptions(account_id, environment_id, trails_configuration, sourceAccountSession, targetAccountSession):
-    prefix = "Setting up CloudTrails subscriptions: "
-    regions = trails_configuration[u'valid_trails'].keys()
+    prefix = "Setting up CloudTrails subscriptions for environment %s:" % environment_id
+    regions = trails_configuration.keys()
+    if not len(regions): return trails_configuration
+
     progress = Progress(
                 len(regions),
-                "Setting up CloudTrails subscriptions:\t\t\t")
+                prefix + "\t")
 
     for region in regions:
-        trail = trails_configuration[u'valid_trails'].pop(region)
+        trail = trails_configuration.pop(region)
         try:
-            trails_configuration[u'valid_trails'][region] = aws_setup_subscription(
+            trails_configuration[region] = aws_setup_subscription(
                             account_id,
                             environment_id,
                             trail,
@@ -80,7 +64,6 @@ def setup_subscriptions(account_id, environment_id, trails_configuration, source
         progress.report()
     progress.done()
     return trails_configuration
-
 
 def aws_setup_subscription(account_id, environment_id, trail, sourceAccountSession, targetAccountSession, progress):
     subprogress = Subprogress(progress, 5)
