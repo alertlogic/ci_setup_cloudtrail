@@ -15,18 +15,35 @@ def get_api_endpoint():
 
 ################################################################
 
-def get_sources(token, account_id, environment_id, region):
+def get_environments(token, account_id, aws_account_id):
+    url = 'https://%s/sources/v1/%s/sources?source.config.aws.account_id=%s' %\
+          (get_api_endpoint(), account_id, aws_account_id)
     params = {
         "headers": {
             "x-aims-auth-token": token
         },
-        "url": 'https://%s/sources/v1/%s/sources?source.config.aws.defender_support=!true&source.type=api&source.config.s3aws.aws_region=%s' % \
-                (get_api_endpoint(), account_id, region)
+        "url": url
     }
-    sources = json.loads(http_operation(params))[u'sources']
+    return [source[u'source'][u'id'] for source in json.loads(http_operation(params))[u'sources']]
 
-    # filter out only sources for the specified environment
-    return [ source for source in sources if source[u'source'][u'environment'] == environment_id ]
+def get_sources(token, account_id, **kwargs):
+    url_args = []
+    sources = []
+    url = 'https://%s/sources/v1/%s/sources' % (get_api_endpoint(), account_id)
+   
+    if 'region' in kwargs:
+        url_args.append('source.config.s3aws.aws_region=%s' % kwargs['region'])
+
+    if 'environment_id' in kwargs and kwargs['environment_id']:
+        url_args.append('source.environment=%s' % kwargs['environment_id'])
+ 
+    params = {
+        'headers': {
+            'x-aims-auth-token': token
+        },
+        'url': len(url_args) and url + '?' + '&'.join(url_args) or url
+    }
+    return json.loads(http_operation(params))[u'sources']
 
 def create_source(token, account_id, source):
     params = {
@@ -98,7 +115,7 @@ def authenticate(username, password):
         print 'Reason: ', e.reason
         raise e
     else:
-        return json.loads(response.read())[u'authentication'][u'token']
+        return json.loads(response.read())[u'authentication']
 
 def http_operation(params, data = None):
     request = Request(params["url"], (None if not data else  json.dumps(data)), params["headers"])

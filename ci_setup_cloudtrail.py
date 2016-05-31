@@ -9,70 +9,144 @@ import boto3
 import boto3.session
 import ssl
 
-from argparse import RawTextHelpFormatter
+from argparse   import RawTextHelpFormatter
+from ci_api     import authenticate, get_environments, get_sources, create_source, get_credentials, create_credential
+from aws_api    import get_cloud_trail_configuration
+from aws_api    import setup_subscriptions
 
-from ci_api import authenticate, get_sources, create_source, get_credentials, create_credential
-
-
-def main():
-    parser = argparse.ArgumentParser("ci_setup_cloudtrail", description="Setup CloudInsight to monitor environment via AWS CloudTrail.", formatter_class=RawTextHelpFormatter)
+def get_user_input():
+    parser = argparse.ArgumentParser(
+                "ci_setup_cloudtrail",
+                description="Setup CloudInsight to monitor environment via AWS CloudTrail.",
+                formatter_class=RawTextHelpFormatter)
 
     parser.add_argument("-u", "--user", metavar="user", help="CloudInsight's user name", required=True)
     parser.add_argument("-p", "--password", metavar="password", help="CloudInsight's password", required=True)
     parser.add_argument("-a", "--account", metavar="account_id", help="CloudInsight's account id", required=True)
-    parser.add_argument("-e", "--environment", metavar="environment_id", help="CloudInsight's environment id", required=True)
+    parser.add_argument("-e", "--environment", metavar="environment_id", help="CloudInsight's environment id", required=False)
     parser.add_argument("-c", "--config", metavar="config", help="Configuration file", required=True)
-    parser.add_argument("-P", "--profile", metavar="profile", help="AWS SDK Profile name", required=True)
-    args = parser.parse_args()
+    parser.add_argument("-P", "--profile", metavar="profile", help="AWS SDK profile name for the AWS Account that owns AWS CloudTrail S3 bucket", required=False)
+    parser.add_argument("-s", "--source-profile", metavar="source-profile", help="AWS SDK Account profile name for the AWS Account that generates AWS CloudTrail logs", required=False)
+    return parser.parse_args()
 
-    targetAccountSession = boto3.session.Session(profile_name = args.profile)
+
+def main():
+    args = get_user_input()
+
+    targetAccountSession = args.profile and boto3.session.Session(profile_name = args.profile) or None
+    sourceAccountSession = args.source_profile and boto3.session.Session(profile_name = args.source_profile) or None
+
+    #
+    # Connect to CloudInsight
+    #
+    auth_info = authenticate(args.user, args.password)
+    token = auth_info[u'token']
+    account_id = args.account and args.account or auth_info[u'account'][u'id']
+
+    print "Successfully logged in into CloudInsight. Account: %s(%s), User: %s" % \
+            (auth_info[u'account'][u'name'], auth_info[u'account'][u'id'], auth_info[u'user']['name'])
+    # print "Token:  %s" %  (token)
 
     #
     # Load configuration file
     #
+    config = {}
+    environments = []
     with open(args.config) as data_file:    
-        data = validate_config(json.load(data_file), targetAccountSession)
-    role_arn = data[u'role']
-    external_id = data[u'external_id']
+        config = json.load(data_file)
+        if u'role' not in config:
+            raise Exception("Missing 'role' attribute in '%s' configuration file" % (args.config))
+        if u'external_id' not in config:
+            raise Exception("Missing 'external_id' attribute in '%s' configuration file" % (args.config))
+        if u'trails' not in config and u'regions' not in config :
+            raise Exception("Missing 'trails' and 'regions' configuration in '%s' configuration file" % (args.config))
 
-    config = (data)
+        role_arn = config[u'role']
+        external_id = config[u'external_id']
 
-    # Connect to CloudInsight
+        if u'environments' in config:
+            environments = config[u'environments']
+        elif u'aws_account_id' in config:
+            environments = get_environments(token, account_id, config[u'aws_account_id'])
+
     #
-    token = authenticate(args.user, args.password)
-    print "Successfully logged in into CloudInsight."
-#    print "Token:  %s" %  (token)
-
-    #
-    # Get CloudInsight Credential ID for the specified role_arn and external_id
+    # Get CloudInsight Credential ID for the specified role
     #
     credential_id = get_credential(token, args.account, role_arn, external_id)[u'credential'][u'id']
+    print "Obtained credential id for '%s' role" % (role_arn)
 
-    for config in data[u'config']:
-        setup_source(token, args.account, args.environment, data[u's3_bucket_region'], config[u'region'], config[u'sqs_queue'], credential_id)
+    #
+    # Get sources for environments specified in the configuration file
+    #
+    sources = []
+    trails = {}
+    for region_name, region_config in config[u'regions'].iteritems():
+        if region_config[u'type'] == u'queue':
+            if not u'queue' in region_config:
+                raise Exception("Invalid config file. 'queue' property is missing for '%s' region" % region_name)
+
+            bucket_region = u'bucket_region' in region_config and region_config[u'bucket_region'] or u'us-east-1'
+            for environment_id in environments:
+                result = get_sources(
+                            token,
+                            account_id,
+                            environment_id = environment_id,
+                            region = region_name)
+                sources.append(update_source_config(
+                        len(result) and result[0] or None,
+                        account_id,
+                        environment_id,
+                        region_name,
+                        credential_id = credential_id,
+                        bucket_region = bucket_region,
+                        queue = region_config[u'queue']))
+        elif region_config[u'type'] == u'trail':
+            if u'trail' not in region_config:
+                raise Exception("Invalid config file. 'trail' property is missing '%s' region" % region_name)
+            trail = get_cloud_trail_configuration(
+                                    region_name,
+                                    region_config[u'trail'], 
+                                    sourceAccountSession,
+                                    targetAccountSession)
+            if trail:
+                 trails[region_name] = trail
+
+    #
+    # Setup CloudTrail subscriptions
+    #
+    for environment_id in environments:
+        trails_configuration = setup_subscriptions(
+                                    args.account,
+                                    environment_id,
+                                    trails,
+                                    sourceAccountSession,
+                                    targetAccountSession)
+
+        for region_name, trail_configuration in trails_configuration.iteritems():
+                result = get_sources(
+                            token,
+                            account_id,
+                            environment = environment_id,
+                            region = region_name)
+                sources.append(update_source_config(
+                        len(result) and result[0] or None,
+                        account_id,
+                        environment_id,
+                        region_name,
+                        credential_id = credential_id,
+                        bucket_region = trail_configuration[u'bucket_region'],
+                        queue = trail_configuration[u'sqs_queue_name']))
+
+    #
+    # Create CloudInsight sources
+    #
+    for source in sources:
+        print "Updating '%s' source in '%s' environment." %\
+              (source[u'source'][u'name'], source[u'source'][u'environment'])
+        create_source(token, account_id, source)
     print "Successfully updated CloudInsight configuration."
-    print_instructions(data)
+    print_instructions(role_arn)
 
-def validate_config(data, session):
-    print "Validating configuration."
-    if hasattr(ssl, '_create_unverified_context'):
-        ssl._create_default_https_context = ssl._create_unverified_context
-
-
-    # Validate s3 bucket and get the region name where it resides
-    bucket_name = data[u'bucket']
-    location = get_bucket_location(session.client('s3').get_bucket_location(Bucket=bucket_name))
-    if u's3_bucket_region' not in data:
-        data[u's3_bucket_region'] = location
-    elif data[u's3_bucket_region'] != location:
-        raise Exception("Bucket '%s' doesn't reside in '%s' region. Use '%s' in your configuration file" % \
-                        (bucket_name, data[u's3_bucket_region'], location))
-
-    # Validate SQS queues
-    for config in data[u'config']:
-        validate_sqs_queue(config[u'region'], config[u'sqs_queue'], session)
-    return data
-  
 def get_credential(token, account_id, arn, external_id):
     credentials = get_credentials(token, account_id)
     for credential in credentials:
@@ -82,27 +156,17 @@ def get_credential(token, account_id, arn, external_id):
 
     return create_credential(token, account_id, arn, external_id)
 
-def setup_source(token, account_id, environment_id, s3_bucket_region, region, sqs_queue_name, credential_id):
-    print "Setting up source for: account_id: '%s', environment_id: '%s', region: '%s', sqs_queue: '%s', credential_id: '%s" % \
-            (account_id, environment_id, region, sqs_queue_name, credential_id)
+def update_source_config(source, account_id, environment_id, region, **kwargs):
+    if not source: source = new_source_config(account_id, environment_id, region)
+    if 'bucket_region' in kwargs and kwargs['bucket_region']:
+        source[u'source'][u'config'][u's3aws'][u's3_bucket_region'] = kwargs['bucket_region']
+    if 'queue' in kwargs and kwargs['queue']:
+        source[u'source'][u'config'][u's3aws'][u'sqs_queue'] = kwargs['queue']
+    if 'credential_id' in kwargs and kwargs['credential_id']:
+        source[u'source'][u'config'][u's3aws'][u'credential'][u'id'] = kwargs['credential_id']
+    return source
 
-    source = get_source_config( \
-                account_id, \
-                environment_id, \
-                region, \
-                get_sources(token, account_id, environment_id, region))
-    source[u'source'][u'config'][u's3aws'][u'credential'][u'id'] = credential_id    
-    source[u'source'][u'config'][u's3aws'][u's3_bucket_region'] = s3_bucket_region
-    source[u'source'][u'config'][u's3aws'][u'sqs_queue'] = sqs_queue_name
-    create_source(token, account_id, source)
-
-def get_source_config(account_id, environment_id, region, sources):
-    for source in sources:
-        config = source[u'source'][u'config']
-        if (config[u'collection_method'] == 'api'and config[u'collection_type'] == 's3aws' and
-            config[u's3aws'][u'aws_region'] == region and config[u's3aws'][u'sqs_queue']):
-            return source
-
+def new_source_config(account_id, environment_id, region):
     return {
         u'source': {
             u'config': {
@@ -121,51 +185,40 @@ def get_source_config(account_id, environment_id, region, sources):
             u'product_type': u'lm',
             u'type': u'api',
             u'environment': environment_id,
-            u'name': u'$outcomes-%s-%s' % (account_id, region)
+            u'name': u'$outcomes-%s-%s-%s' % (account_id, region, environment_id)
         }
     }
-
-def validate_sqs_queue(region, sqs_queue_name, session):
-    print "Processing %s queue for %s region" % (sqs_queue_name, region)
-    try:
-        sqs = session.resource('sqs', region_name = region)
-        sqs_queue = sqs.get_queue_by_name(QueueName = sqs_queue_name)
-        if not sqs_queue:
-            raise Exception("SQS Queue '%s' doesn't exist in '%s' region" % (sqs_queue_name, region))
-
-        print sqs_queue.attributes.get('Policy')
-        statement = json.loads(sqs_queue.attributes.get('Policy'))[u'Statement']
-        for sid in statement:
-            if u'Effect' in sid and sid[u'Effect'] == u'Allow' and \
-                    u'Action' in sid and sid[u'Action'] == u'SQS:SendMessage' and \
-                    u'Condition' in sid and u'ArnEquals' in sid[u'Condition'] and \
-                    u'aws:SourceArn' in sid[u'Condition'][u'ArnEquals']:
-                arn = sid[u'Condition'][u'ArnEquals'][u'aws:SourceArn'].split(u':')
-                if arn[2] == u'sns': return True
-        print "Warning: Didn't detect if '%s' SQS Queue has permissions to allow SNS publishing. \
-    Follow instructions in http://docs.aws.amazon.com/sns/latest/dg/SendMessageToSQS.html#SendMessageToSQS.sqs.permissions to setup to give permission to the Amazon SNS topic to send messages to the Amazon SQS queue." % sqs_queue_name
-    except Exception as e:
-        if e.response['Error']['Code'] == 'AWS.SimpleQueueService.NonExistentQueue':
-            raise Exception("SQS Queue %s doesn't exist in %s region." % (sqs_queue_name, region))
-        else:
-            print "Unexpected error: %s" % e
-            raise e
-     
-def get_bucket_location(location):
-    constraint = location['LocationConstraint']
-    return constraint and constraint or u'us-east-1'
-
-def print_instructions(data):
-    s3_policy = {
-        "Sid": "GetCloudTrailObjects",
-        "Effect": "Allow",
-        "Principal": {
-            "AWS": data[u'role']
+   
+def print_instructions(role_arn):
+    s3_policy = [
+        {
+            "Sid": "GetCloudTrailObjects",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "{}".format(role_arn)
+            },
+            "Action": [
+                "s3:GetObjectVersionAcl",
+                "s3:GetObject",
+                "s3:GetObjectAcl"
+            ],
+            "Resource": "arn:aws:s3:::<bucket_name>/*"
         },
-        "Action": "s3:GetObject*",
-        "Resource": "arn:aws:s3:::{}/*".format(data[u'bucket'])
-    }
-    print "Make sure to add the following statement to '{}' bucket policy".format(data[u'bucket'])
+        {
+            "Sid": "GetCloudTrailObjects",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "{}".format(role_arn)
+            },
+            "Action": [
+                "s3:ListBucket",
+                "s3:GetBucket*"
+            ],
+            "Resource": "arn:aws:s3:::<bucket_name>"
+        }
+    ]
+    #print "Make sure to add the following statement to '{}' bucket policy".format(data[u'bucket'])
+    print "Make sure to add the following statement to S3 bucket policy."
     print json.dumps(s3_policy, indent = 4)
 
 if __name__ =='__main__':
