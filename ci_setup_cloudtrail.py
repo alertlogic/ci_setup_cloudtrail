@@ -22,11 +22,11 @@ def get_user_input():
 
     parser.add_argument("-u", "--user", metavar="user", help="CloudInsight's user name", required=True)
     parser.add_argument("-p", "--password", metavar="password", help="CloudInsight's password", required=True)
-    parser.add_argument("-a", "--account", metavar="account_id", help="CloudInsight's account id", required=False)
+    parser.add_argument("-a", "--account", metavar="account_id", help="CloudInsight's account id", required=True)
     parser.add_argument("-e", "--environment", metavar="environment_id", help="CloudInsight's environment id", required=False)
     parser.add_argument("-c", "--config", metavar="config", help="Configuration file", required=True)
-    parser.add_argument("-P", "--profile", metavar="profile", help="AWS SDK Profile name", required=False)
-    parser.add_argument("-s", "--source-profile", metavar="source-profile", help="AWS SDK Primary Account Profile Name", required=False)
+    parser.add_argument("-P", "--profile", metavar="profile", help="AWS SDK profile name for the AWS Account that owns AWS CloudTrail S3 bucket", required=False)
+    parser.add_argument("-s", "--source-profile", metavar="source-profile", help="AWS SDK Account profile name for the AWS Account that generates AWS CloudTrail logs", required=False)
     return parser.parse_args()
 
 
