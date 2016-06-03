@@ -10,9 +10,9 @@ import boto3.session
 import ssl
 
 from argparse   import RawTextHelpFormatter
-from ci_api     import authenticate, get_environments, get_sources, create_source, get_credentials, create_credential
-from aws_api    import get_cloud_trail_configuration
-from aws_api    import setup_subscriptions
+from ci_api     import CI_API
+from aws_api    import get_cloud_trail_configuration, setup_subscriptions, validate_queue, get_account_id
+from utils import Progress, Subprogress
 
 def get_user_input():
     parser = argparse.ArgumentParser(
@@ -22,7 +22,12 @@ def get_user_input():
 
     parser.add_argument("-u", "--user", metavar="user", help="CloudInsight's user name", required=True)
     parser.add_argument("-p", "--password", metavar="password", help="CloudInsight's password", required=True)
-    parser.add_argument("-a", "--account", metavar="account_id", help="CloudInsight's account id", required=True)
+    parser.add_argument("-l", "--locality",
+                        metavar="locality",
+                        help="CloudInsight region. Choose from from 'us', 'uk'. Default is 'us'",
+                        choices=['us', 'uk'],
+                        required=False)
+    parser.add_argument("-a", "--account", metavar="account_id", help="CloudInsight's account id", required=False)
     parser.add_argument("-e", "--environment", metavar="environment_id", help="CloudInsight's environment id", required=False)
     parser.add_argument("-c", "--config", metavar="config", help="Configuration file", required=True)
     parser.add_argument("-P", "--profile", metavar="profile", help="AWS SDK profile name for the AWS Account that owns AWS CloudTrail S3 bucket", required=False)
@@ -39,14 +44,10 @@ def main():
     #
     # Connect to CloudInsight
     #
-    auth_info = authenticate(args.user, args.password)
-    token = auth_info[u'token']
-    account_id = args.account and args.account or auth_info[u'account'][u'id']
+    ci = CI_API(args.user, args.password, account_id = args.account, locality = args.locality)
 
     print "Successfully logged in into CloudInsight. Account: %s(%s), User: %s" % \
-            (auth_info[u'account'][u'name'], auth_info[u'account'][u'id'], auth_info[u'user']['name'])
-    # print "Token:  %s" %  (token)
-
+            (ci.auth_account_name, ci.auth_account_id, ci.auth_user_name)
     #
     # Load configuration file
     #
@@ -67,12 +68,12 @@ def main():
         if u'environments' in config:
             environments = config[u'environments']
         elif u'aws_account_id' in config:
-            environments = get_environments(token, account_id, config[u'aws_account_id'])
+            environments = ci.get_environments(config[u'aws_account_id'])
 
     #
     # Get CloudInsight Credential ID for the specified role
     #
-    credential_id = get_credential(token, args.account, role_arn, external_id)[u'credential'][u'id']
+    credential_id = get_credential(ci, role_arn, external_id)[u'credential'][u'id']
     print "Obtained credential id for '%s' role" % (role_arn)
 
     #
@@ -80,29 +81,34 @@ def main():
     #
     sources = []
     trails = {}
+    progress = Progress(
+                len(config[u'regions']),
+                "Validating configuration.\t\t\t\t\t\t\t\t\t\t")
     for region_name, region_config in config[u'regions'].iteritems():
+        progress.report()
         if region_config[u'type'] == u'queue':
             if not u'queue' in region_config:
                 raise Exception("Invalid config file. 'queue' property is missing for '%s' region" % region_name)
 
+            if targetAccountSession and not validate_queue(region_name, region_config[u'queue'], targetAccountSession):
+                raise Exception("Invalid config file. '%s' queue doesn't exist in '%s' region in '%s' AWS Account." %\
+                               (region_config[u'queue'], region_name, get_account_id(targetAccountSession) ) )
+
             bucket_region = u'bucket_region' in region_config and region_config[u'bucket_region'] or u'us-east-1'
             for environment_id in environments:
-                result = get_sources(
-                            token,
-                            account_id,
-                            environment_id = environment_id,
-                            region = region_name)
+                result = ci.get_sources(environment_id = environment_id, region = region_name)
                 sources.append(update_source_config(
                         len(result) and result[0] or None,
-                        account_id,
+                        ci.account_id,
                         environment_id,
                         region_name,
                         credential_id = credential_id,
                         bucket_region = bucket_region,
                         queue = region_config[u'queue']))
         elif region_config[u'type'] == u'trail':
-            if u'trail' not in region_config:
+            if u'trail' not in region_config or not region_config[u'trail']:
                 raise Exception("Invalid config file. 'trail' property is missing '%s' region" % region_name)
+            
             trail = get_cloud_trail_configuration(
                                     region_name,
                                     region_config[u'trail'], 
@@ -110,6 +116,7 @@ def main():
                                     targetAccountSession)
             if trail:
                  trails[region_name] = trail
+    progress.done()
 
     #
     # Setup CloudTrail subscriptions
@@ -123,14 +130,10 @@ def main():
                                     targetAccountSession)
 
         for region_name, trail_configuration in trails_configuration.iteritems():
-                result = get_sources(
-                            token,
-                            account_id,
-                            environment = environment_id,
-                            region = region_name)
+                result = ci.get_sources(environment = environment_id, region = region_name)
                 sources.append(update_source_config(
                         len(result) and result[0] or None,
-                        account_id,
+                        ci.account_id,
                         environment_id,
                         region_name,
                         credential_id = credential_id,
@@ -143,18 +146,18 @@ def main():
     for source in sources:
         print "Updating '%s' source in '%s' environment." %\
               (source[u'source'][u'name'], source[u'source'][u'environment'])
-        create_source(token, account_id, source)
+        ci.create_source(source)
     print "Successfully updated CloudInsight configuration."
     print_instructions(role_arn)
 
-def get_credential(token, account_id, arn, external_id):
-    credentials = get_credentials(token, account_id)
+def get_credential(ci, arn, external_id):
+    credentials = ci.get_credentials()
     for credential in credentials:
         c = credential[u'credential']
         if (c[u'type'] == 'iam_role' and c[u'iam_role'][u'arn'] == arn):
             return credential
 
-    return create_credential(token, account_id, arn, external_id)
+    return ci.create_credential(arn, external_id)
 
 def update_source_config(source, account_id, environment_id, region, **kwargs):
     if not source: source = new_source_config(account_id, environment_id, region)

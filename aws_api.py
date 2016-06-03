@@ -7,10 +7,11 @@ from utils import Progress, Subprogress
 
 def get_cloud_trail_configuration(region_name, trail_name, sourceAccountSession, targetAccountSession):
     if not sourceAccountSession or not targetAccountSession:
+        print "WARNING. Invalid configuration provided for '%s' region. Skipping..." % region_name
         return None
 
-    source_account_id = get_account_id_from_arn(sourceAccountSession.client('iam').get_user()[u'User'][u'Arn'])
-    target_account_id = get_account_id_from_arn(targetAccountSession.client('iam').get_user()[u'User'][u'Arn'])
+    source_account_id = get_account_id(sourceAccountSession)
+    target_account_id = get_account_id(targetAccountSession)
     trail = sourceAccountSession.client(
             'cloudtrail', 
             region_name = region_name).describe_trails(trailNameList=[trail_name])[u'trailList']
@@ -45,7 +46,7 @@ def setup_subscriptions(account_id, environment_id, trails_configuration, source
 
     progress = Progress(
                 len(regions),
-                prefix + "\t")
+                prefix + "\t\t")
 
     for region in regions:
         trail = trails_configuration.pop(region)
@@ -156,6 +157,23 @@ def aws_setup_subscription(account_id, environment_id, trail, sourceAccountSessi
     subprogress.done()
     return trail
 
+def validate_queue(region, queue, targetAccountSession):
+    sqs = targetAccountSession.client('sqs', region_name = region)
+    try:
+        queue_url = sqs.get_queue_url(QueueName = queue)[u'QueueUrl']
+        return True
+    except Exception as e:
+        if e.response['Error']['Code'] == 'AWS.SimpleQueueService.NonExistentQueue':
+            # Queue doesn't exist. Create it.
+            return False
+        else:
+            print e.response['Error']
+            message = "Failed to get '%s' queue in '%s' region. Error: %s" % \
+                      (queue_name, trail[u'region'], e.response['Error']['Code'])
+            raise Exception(make_trail_error(trail[u'region'], message))
+
+def get_account_id(session):
+    return get_account_id_from_arn(session.client('iam').get_user()[u'User'][u'Arn'])
 
 def get_trails_list(trails, session):
     result = {}
@@ -257,17 +275,4 @@ def get_topic_queue_subscription(sns, topic_arn, sqs_queue_arn):
                     TopicArn = topic_arn,
                     NextToken = response[u'NextToken'])
     return None
-
-# def create_subscriptions(targetAccountSession
-            #print "ARN: %s" % (trail[u'SnsTopicARN'].split(':')[4])
-
-#{u'trailList': [{u'IncludeGlobalServiceEvents': True, u'Name': u'Default', u'TrailARN': u'arn:aws:cloudtrail:us-west-1:481746159046:trail/Default', u'LogFileValidationEnabled': False, u'SnsTopicARN': u'arn:aws:sns:us-west-1:481746159046:outcomestopic', u'IsMultiRegionTrail': False, u'S3BucketName': u'outcomesbucket-481746159046', u'SnsTopicName': u'outcomestopic', u'HomeRegion': u'us-west-1'}], 'ResponseMetadata': {'HTTPStatusCode': 200, 'RequestId': 'f8b9a8d1-1cf9-11e6-a3d1-cbf88bd4701a'}}
-
-#    parser.add_argument("-s", "--source-profile", metavar="source-profile", help="AWS SDK Primary Account Profile Name", required=False)
-
-    #
-    # Get CloudTrail configuration
-    #
-#    ct_config = args.source_profile and get_cloud_trail_configuration(args.source_profile) or None
-
 

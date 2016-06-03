@@ -50,7 +50,7 @@ class Subprogress:
     def report(self):
         parent_state = self.parent.get_state()
         filled_len = int(round(parent_state['step_len'] * self.count / float(self.total))) + parent_state['filled_len']
-        percents = parent_state['percents'] + round(100 * ( (self.count / float(self.total)) / (self.parent.bar_len/ float(self.parent.total)) ), 1)
+        percents = (round(100 * (self.count / float(self.total)) / (1 / float(self.parent.total)), 1) + parent_state['percents'])
         bar = '#' * filled_len + '-' * (self.parent.bar_len - filled_len)
         self.parent.output(bar, percents)
         self.count += 1

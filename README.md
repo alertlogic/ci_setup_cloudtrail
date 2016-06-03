@@ -159,7 +159,11 @@ Example of config.json:
     }
 }
 ```  
-4.2. Setup CloudInsight backend to monitor CloudTrail specified in config.json for account id 123456  
+4.2.  Setup CloudInsight backend to use queue and cross-account role specified in config.json for account id 123456 in the UK region
+```
+./ci_setup_cloudtrail.py -u someuser@acmecorp.com -p "Password1234$" -a 123456 -c config.json -l uk
+```  
+4.3. Setup CloudInsight backend to monitor CloudTrail specified in config.json for account id 123456  
 ```
 ./ci_setup_cloudtrail.py -u someuser@acmecorp.com -p "Password1234$" -c config.json -s CloudTrailAccountProfile -P S3AccountProfile
 ```  
