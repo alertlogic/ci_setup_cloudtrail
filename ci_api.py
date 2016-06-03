@@ -7,84 +7,107 @@ from urllib2 import Request, urlopen, URLError, HTTPError
 
 ################################################################
 
-DEBUG = False
-
-def get_api_endpoint():
-    if DEBUG: return 'api.product.dev.alertlogic.com'
-    else: return 'api.cloudinsight.alertlogic.com'
+def get_api_endpoint(locality = 'us'):
+    return {
+        'DEBUG': 'api.product.dev.alertlogic.com',
+        'us': 'api.cloudinsight.alertlogic.com',
+        'uk': 'api.cloudinsight.alertlogic.co.uk',
+    }.get(locality, 'api.cloudinsight.alertlogic.com') 
 
 ################################################################
 
-def get_environments(token, account_id, aws_account_id):
-    url = 'https://%s/sources/v1/%s/sources?source.config.aws.account_id=%s' %\
-          (get_api_endpoint(), account_id, aws_account_id)
-    params = {
-        "headers": {
-            "x-aims-auth-token": token
-        },
-        "url": url
-    }
-    return [source[u'source'][u'id'] for source in json.loads(http_operation(params))[u'sources']]
+class CI_API:
+    api_endpoint        = get_api_endpoint()
+    token               = None
+    account_id          = None
+    auth_account_id     = None
+    auth_account_name   = None
+    auth_user_name      = None
+    def __init__(self, user, password, **kwargs):
+        if 'locality' in kwargs and kwargs['locality']:
+            self.api_endpoint = get_api_endpoint(kwargs['locality'])
 
-def get_sources(token, account_id, **kwargs):
-    url_args = []
-    sources = []
-    url = 'https://%s/sources/v1/%s/sources' % (get_api_endpoint(), account_id)
-   
-    if 'region' in kwargs:
-        url_args.append('source.config.s3aws.aws_region=%s' % kwargs['region'])
+        auth_info = authenticate(self.api_endpoint, user, password)
+        self.token = auth_info[u'token']
+        if 'account_id' in kwargs and kwargs['account_id']:
+            self.account_id = kwargs['account_id']
+        else:
+            self.account_id = auth_info[u'account'][u'id']
+            
+        self.auth_account_name  = auth_info[u'account'][u'name']
+        self.auth_account_id    = auth_info[u'account'][u'id']
+        self.auth_user_name     = auth_info[u'user']['name']
 
-    if 'environment_id' in kwargs and kwargs['environment_id']:
-        url_args.append('source.environment=%s' % kwargs['environment_id'])
- 
-    params = {
-        'headers': {
-            'x-aims-auth-token': token
-        },
-        'url': len(url_args) and url + '?' + '&'.join(url_args) or url
-    }
-    return json.loads(http_operation(params))[u'sources']
+    def get_environments(self, aws_account_id):
+        url = 'https://%s/sources/v1/%s/sources?source.config.aws.account_id=%s' %\
+              (self.api_endpoint, self.account_id, aws_account_id)
+        params = {
+            "headers": {
+                "x-aims-auth-token": self.token
+            },
+            "url": url
+        }
+        return [source[u'source'][u'id'] for source in json.loads(http_operation(params))[u'sources']]
 
-def create_source(token, account_id, source):
-    params = {
-        "headers": {
-            "x-aims-auth-token": token
-        },
-        "url": 'https://%s/sources/v1/%s/sources' % (get_api_endpoint(), account_id)
-    }
-    http_operation(params, source)
+    def get_sources(self, **kwargs):
+        url_args = []
+        sources = []
+        url = 'https://%s/sources/v1/%s/sources' % (self.api_endpoint, self.account_id)
+       
+        if 'region' in kwargs:
+            url_args.append('source.config.s3aws.aws_region=%s' % kwargs['region'])
 
-def get_credentials(token, account_id):
-    params = {
-        "headers": {
-            "x-aims-auth-token": token
-        },
-        "url": 'https://%s/sources/v1/%s/credentials' % (get_api_endpoint(), account_id)
-    }
-    return json.loads(http_operation(params))[u'credentials']
+        if 'environment_id' in kwargs and kwargs['environment_id']:
+            url_args.append('source.environment=%s' % kwargs['environment_id'])
+     
+        params = {
+            'headers': {
+                'x-aims-auth-token': self.token
+            },
+            'url': len(url_args) and url + '?' + '&'.join(url_args) or url
+        }
+        return json.loads(http_operation(params))[u'sources']
 
-def create_credential(token, account_id, arn, external_id):
-    print "Creating credential object. Account: '%s', Role: '%s'" % (account_id, arn)
-    params = {
-        "headers": {
-            "x-aims-auth-token": token,
-            "Content-Type": "application/json"
-        },
-        "url": 'https://%s/sources/v1/%s/credentials' % (get_api_endpoint(), account_id)
-    }
-    data = {
-        "credential": {
-            "name": "CrossAccountCloudTrailRole",
-            "type": "iam_role",
-            "iam_role": {
-                "arn": arn,
-                "external_id": external_id
+    def create_source(self, source):
+        params = {
+            "headers": {
+                "x-aims-auth-token": self.token
+            },
+            "url": 'https://%s/sources/v1/%s/sources' % (self.api_endpoint, self.account_id)
+        }
+        http_operation(params, source)
+
+    def get_credentials(self):
+        params = {
+            "headers": {
+                "x-aims-auth-token": self.token
+            },
+            "url": 'https://%s/sources/v1/%s/credentials' % (self.api_endpoint, self.account_id)
+        }
+        return json.loads(http_operation(params))[u'credentials']
+
+    def create_credential(self, arn, external_id):
+        print "Creating credential object. Account: '%s', Role: '%s'" % (self.account_id, arn)
+        params = {
+            "headers": {
+                "x-aims-auth-token": self.token,
+                "Content-Type": "application/json"
+            },
+            "url": 'https://%s/sources/v1/%s/credentials' % (self.api_endpoint, self.account_id)
+        }
+        data = {
+            "credential": {
+                "name": "CrossAccountCloudTrailRole",
+                "type": "iam_role",
+                "iam_role": {
+                    "arn": arn,
+                    "external_id": external_id
+                }
             }
         }
-    }
-    return json.loads(http_operation(params, data))
+        return json.loads(http_operation(params, data))
 
-def authenticate(username, password):
+def authenticate(api_endpoint, username, password):
     try:
         x = ssl.PROTOCOL_TLSv1_2
     except AttributeError:
@@ -98,7 +121,7 @@ def authenticate(username, password):
         "headers" : {
             "Authorization": auth_header
         },
-        "url": 'https://%s/aims/v1/authenticate' % (get_api_endpoint())
+        "url": 'https://%s/aims/v1/authenticate' % api_endpoint
     }
 
     #perform authentication
