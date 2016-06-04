@@ -104,7 +104,7 @@ def main():
                         region_name,
                         credential_id = credential_id,
                         bucket_region = bucket_region,
-                        queue = region_config[u'queue']))
+                        queue = get_queue_name(region_config[u'queue'])))
         elif region_config[u'type'] == u'trail':
             if u'trail' not in region_config or not region_config[u'trail']:
                 raise Exception("Invalid config file. 'trail' property is missing '%s' region" % region_name)
@@ -192,6 +192,13 @@ def new_source_config(account_id, environment_id, region):
         }
     }
    
+def get_queue_name(queue):
+    parsed_name = queue.split(":")
+    if len(parsed_name) == 1: return queue
+    elif len(parsed_name) == 6: return parsed_name[5]
+    else:
+        raise Exception("Invalid queue name format. Queue name must be either a valid arn or a name")
+
 def print_instructions(role_arn):
     s3_policy = [
         {
